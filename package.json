@@ -1,0 +1,12 @@
+{
+  "scripts": {
+    "dev": "concurrently -n backend,frontend -c green,cyan \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "dev:backend": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dev-backend.ps1",
+    "dev:frontend": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dev-frontend.ps1",
+    "open": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/open-app.ps1",
+    "install:all": "npm install --prefix frontend && python -m venv .venv && .\\.venv\\Scripts\\python -m pip install -r backend/requirements.txt && npm install"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
