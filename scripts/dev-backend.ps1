@@ -12,8 +12,8 @@ if (Test-Path $venvPython) {
 }
 
 if (-not (Test-Path (Join-Path $rootDir ".env"))) {
-    Write-Host "[backend] .env not found. Copy .env.example to .env and set OPENAI_API_KEY."
+    Write-Host "[backend] .env not found. Copy .env.example to .env if you need custom settings."
 }
 
 Set-Location $backendDir
-& $python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+& $python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8002

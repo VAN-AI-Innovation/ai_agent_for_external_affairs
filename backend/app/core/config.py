@@ -9,8 +9,8 @@ ROOT_DIR = Path(__file__).resolve().parents[3]
 
 
 class Settings(BaseSettings):
-    openai_api_key: str | None = Field(default=None, alias="OPENAI_API_KEY")
-    openai_model: str = Field(default="gpt-4.1-mini", alias="OPENAI_MODEL")
+    local_model_id: str = Field(default="Qwen/Qwen2.5-0.5B-Instruct", alias="LOCAL_MODEL_ID")
+    local_model_max_new_tokens: int = Field(default=700, alias="LOCAL_MODEL_MAX_NEW_TOKENS")
     app_env: str = Field(default="local", alias="APP_ENV")
     backend_cors_origins: str = Field(
         default="http://localhost:5173",
