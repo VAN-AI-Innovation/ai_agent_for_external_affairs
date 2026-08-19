@@ -66,14 +66,25 @@ const quickQuestions = [
 function renderMarkdownLike(text: string) {
   const blocks = text.split(/\n{2,}/).filter((block) => block.trim().length > 0);
 
+  function renderInline(line: string) {
+    const parts = line.split(/(\*\*.+?\*\*)/g);
+    return parts.map((part, index) =>
+      part.startsWith("**") && part.endsWith("**") ? (
+        <strong key={index}>{part.slice(2, -2)}</strong>
+      ) : (
+        <React.Fragment key={index}>{part}</React.Fragment>
+      ),
+    );
+  }
+
   return blocks.map((block, blockIndex) => {
     const lines = block.split("\n").filter((line) => line.trim().length > 0);
     const firstLine = lines[0]?.trim() ?? "";
 
-    if (firstLine.startsWith("## ")) {
+    if (/^#{2,3}\s+/.test(firstLine)) {
       return (
         <section className="result-block" key={blockIndex}>
-          <h3>{firstLine.replace(/^##\s+/, "")}</h3>
+          <h3>{firstLine.replace(/^#{2,3}\s+/, "")}</h3>
           {renderMarkdownLike(lines.slice(1).join("\n"))}
         </section>
       );
@@ -109,7 +120,7 @@ function renderMarkdownLike(text: string) {
       return (
         <ul key={blockIndex}>
           {lines.map((line, lineIndex) => (
-            <li key={lineIndex}>{line.trim().replace(/^[-*]\s+/, "")}</li>
+            <li key={lineIndex}>{renderInline(line.trim().replace(/^[-*]\s+/, ""))}</li>
           ))}
         </ul>
       );
@@ -119,7 +130,7 @@ function renderMarkdownLike(text: string) {
       return (
         <ol key={blockIndex}>
           {lines.map((line, lineIndex) => (
-            <li key={lineIndex}>{line.trim().replace(/^\d+\.\s+/, "")}</li>
+            <li key={lineIndex}>{renderInline(line.trim().replace(/^\d+\.\s+/, ""))}</li>
           ))}
         </ol>
       );
@@ -129,7 +140,7 @@ function renderMarkdownLike(text: string) {
       <p key={blockIndex}>
         {lines.map((line, lineIndex) => (
           <React.Fragment key={lineIndex}>
-            {line}
+            {renderInline(line)}
             {lineIndex < lines.length - 1 && <br />}
           </React.Fragment>
         ))}

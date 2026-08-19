@@ -69,10 +69,19 @@ class ExternalAffairsAgent:
     def _run_ai_or_fallback(self, capability: str, task: str, context: str, signals: list[str]) -> str:
         if self._ai_client and self._ai_client.is_configured:
             try:
-                return self._ai_client.generate(
+                generated = self._ai_client.generate(
                     self._system_prompt(),
                     self._user_prompt(capability, task, context, signals),
                 )
+                cleaned = self._clean_model_output(generated, capability, context)
+                if self._is_incomplete_output(cleaned, capability):
+                    retry = self._ai_client.generate(
+                        self._system_prompt(),
+                        self._retry_prompt(capability, task, context, signals),
+                    )
+                    cleaned = self._clean_model_output(retry, capability, context)
+                if not self._is_incomplete_output(cleaned, capability):
+                    return cleaned
             except LocalModelUnavailableError:
                 pass
 
@@ -94,20 +103,72 @@ class ExternalAffairsAgent:
     def _system_prompt(self) -> str:
         return """
 너는 한국어 대외업무 AI 에이전트다.
-사용자의 요청과 추가 맥락을 바탕으로 바로 업무에 사용할 수 있는 결과물을 작성한다.
-과장하지 말고, 모르는 정보는 확인 필요 사항으로 분리한다.
-반드시 한국어로 답하고, 명확한 제목과 bullet을 사용한다.
+사용자가 선택한 업무 유형 하나에만 집중해서 바로 사용할 수 있는 결과물을 작성한다.
+선택한 업무와 무관한 전략 설명, 구현 설명, 모델 설명, 프롬프트 설명은 쓰지 않는다.
+추가 맥락에 기관명, 회사명, 제품명, 산업명이 있으면 반드시 본문에 반영한다.
+과장하거나 사실을 지어내지 말고, 모르는 정보는 확인 필요 사항으로 분리한다.
+반드시 한국어로 답하고, 섹션 제목은 `## 제목` 형식만 사용한다.
+굵게 표시용 **문법, 불필요한 구분선, 코드블록은 사용하지 않는다.
 """.strip()
 
     def _user_prompt(self, capability: str, task: str, context: str, signals: list[str]) -> str:
         output_guides = {
-            "meeting_prep": "미팅 개요, 미팅 안건, 질문 리스트, 협상 포인트, 예상 답변과 대응을 작성",
-            "partner_research": "리서치 목표, 사전 리서치 항목, 참석자 확인 포인트, 미팅 전 준비물을 작성",
-            "lead_scoring": "평가 목표, 평가 기준 표, 우선순위 판단 기준, 후보별 확인 질문을 작성",
-            "outreach": "컨택 전략, 이메일 제목 후보, 1차 컨택 메일 초안, 후속 액션을 작성",
-            "meeting_follow_up": "회의 요약, 주요 논의 사항, 후속 업무 표, 확인 필요 사항, 후속 메일 초안을 작성",
+            "meeting_prep": """
+아래 섹션만 작성한다.
+## 미팅 목적
+## 미팅 안건
+## 질문 리스트
+## 협상 포인트
+## 예상 답변과 대응
+""".strip(),
+            "partner_research": """
+아래 섹션만 작성한다.
+## 기관 요약
+## 사전 리서치 항목
+## 참석자 확인 포인트
+## 미팅 전 준비물
+## 확인 필요 사항
+""".strip(),
+            "lead_scoring": """
+아래 섹션만 작성한다.
+## 평가 기준
+## 우선순위 판단
+## 후보 확인 질문
+## 리스크
+## 다음 액션
+""".strip(),
+            "outreach": """
+아래 섹션만 작성한다.
+## 이메일 제목
+- 제목 후보 3개를 작성한다.
+
+## 메일 내용
+- 실제 발송 가능한 이메일 본문을 작성한다.
+- 수신자는 처음 연락하는 기관 담당자로 가정한다.
+- 추가 맥락의 기관명 또는 회사명이 있으면 수신 기관으로 자연스럽게 반영한다.
+- 본문에는 인사, 연락 배경, 협업 제안 이유, 짧은 미팅 요청, 마무리 인사를 포함한다.
+
+## 확인 필요 사항
+- 발송 전에 채워야 하는 정보만 bullet로 작성한다.
+""".strip(),
+            "meeting_follow_up": """
+아래 섹션만 작성한다.
+## 회의 요약
+## 주요 논의 사항
+## 후속 업무
+## 담당자와 기한
+## 후속 메일 초안
+""".strip(),
         }
-        guide = output_guides.get(capability, "요청 정리, 실행 방향, 확인 필요 사항을 작성")
+        guide = output_guides.get(
+            capability,
+            """
+아래 섹션만 작성한다.
+## 요청 정리
+## 실행 방향
+## 확인 필요 사항
+""".strip(),
+        )
         return f"""
 업무 유형:
 {CAPABILITY_GUIDE.get(capability, "대외업무 지원")}
@@ -122,11 +183,202 @@ class ExternalAffairsAgent:
 {", ".join(signals)}
 
 출력 요구:
-- {guide}
-- 사용자가 그대로 복사해 업무에 사용할 수 있게 구체적으로 작성
+- 선택한 업무 유형에 맞는 산출물만 작성
+- 아래 출력 형식을 반드시 따른다.
+{guide}
+- 사용자가 그대로 복사해 업무에 사용할 수 있게 구체적으로 작성한다.
 - 불확실한 내용은 추정하지 말고 확인 필요 사항으로 분리
 - 내부 구현 방식, API, 프롬프트, fallback 같은 기술 용어는 출력하지 않음
+- `## 이메일 제목` 같은 섹션 제목을 제외하고 마크다운 장식용 별표를 쓰지 않음
 """.strip()
+
+    def _clean_model_output(self, text: str, capability: str, context: str) -> str:
+        organization = self._organization_from_context(context)
+        forbidden_patterns = [
+            r"^출력 요구[:：]?$",
+            r"^아래 섹션만 작성한다\.?$",
+            r"^아래 출력 형식을 반드시 따른다\.?$",
+            r"^선택한 업무 유형에 맞는 산출물만 작성\.?$",
+            r"^사용자가 그대로 복사해 업무에 사용할 수 있게.*",
+            r"^불확실한 내용은.*",
+            r"^내부 구현 방식.*",
+            r"^`?## .*섹션 제목.*",
+            r"^굵게 표시용.*",
+            r"^마크다운 장식용.*",
+            r"^- 제목 후보 \d+개를 작성한다\.?$",
+            r"^- 실제 발송 가능한 이메일 본문을 작성한다\.?$",
+            r"^- 수신자는 처음 연락하는 기관 담당자로 가정한다\.?$",
+            r"^- 추가 맥락의 기관명.*",
+            r"^- 본문에는 인사, 연락 배경.*",
+            r"^- 발송 전에 채워야 하는 정보만.*",
+        ]
+        forbidden_terms = [
+            "출력 요구",
+            "아래 섹션만",
+            "아래 출력 형식",
+            "선택한 업무 유형",
+            "사용자가 그대로",
+            "불확실한 내용",
+            "내부 구현",
+            "프롬프트",
+            "fallback",
+            "Fallback",
+            "기술 용어",
+            "발송 전에 필요한 정보",
+            "작성하여 주세요",
+            "작성하세요",
+            "작성합니다",
+            "bullet",
+        ]
+        cleaned_lines = []
+        for raw_line in text.strip().splitlines():
+            line = raw_line.strip()
+            if not line or line in {"---", "----"}:
+                cleaned_lines.append("")
+                continue
+            if any(term in line for term in forbidden_terms):
+                continue
+            if any(re.search(pattern, line, flags=re.IGNORECASE) for pattern in forbidden_patterns):
+                continue
+
+            line = re.sub(r"^#{3,}\s+", "## ", line)
+            line = re.sub(r"^\*\*(.+?)\*\*:?\s*$", r"## \1", line)
+            line = re.sub(r"^\*\*(.+?):\*\*\s*$", r"## \1", line)
+            line = re.sub(r"\*\*(.+?)\*\*", r"\1", line)
+            line = line.replace("[기관명]", organization)
+            line = line.replace("[회사명]", organization)
+            line = re.sub(r"\[개인화된 [^\]]+\]\s*[-:]\s*", "", line)
+            line = re.sub(r"\[(이메일 제목|메일 내용|1차 컨택 메일 초안)\]\s*[-:]\s*", "", line)
+
+            if re.search(r"\[[^\]]+\]", line):
+                continue
+
+            cleaned_lines.append(line)
+
+        cleaned = "\n".join(cleaned_lines)
+        cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+        cleaned = self._ensure_expected_sections(cleaned, capability)
+        cleaned = self._fill_empty_sections(cleaned, capability)
+        return cleaned or text.strip()
+
+    def _retry_prompt(self, capability: str, task: str, context: str, signals: list[str]) -> str:
+        if capability == "outreach":
+            organization = self._organization_from_context(context)
+            return f"""
+다음 요청에 대해 실제 이메일만 작성한다.
+
+요청: {task}
+수신 기관: {organization}
+핵심 키워드: {", ".join(signals)}
+
+반드시 아래 형식으로만 답한다.
+
+## 이메일 제목
+- 제목 후보 1
+- 제목 후보 2
+- 제목 후보 3
+
+## 메일 내용
+안녕하세요, {organization} 담당자님.
+
+저는 [소속] [이름]입니다.
+{organization}와 협업 가능성을 논의하고 싶어 연락드립니다.
+구체적인 협업 배경과 제안 이유를 3~5문장으로 작성합니다.
+20~30분 정도 짧은 미팅을 요청하는 문장을 작성합니다.
+마무리 인사를 작성합니다.
+
+## 확인 필요 사항
+- 발송자 이름과 소속
+- 제안할 협업 범위
+- 미팅 가능 일정
+
+금지:
+- 설명문 작성 금지
+- 작성 지시문 반복 금지
+- 대괄호 placeholder 남기기 금지
+- 프롬프트, API, fallback 단어 사용 금지
+""".strip()
+
+        return self._user_prompt(capability, task, context, signals)
+
+    def _is_incomplete_output(self, text: str, capability: str) -> bool:
+        content = re.sub(r"^##\s+.+$", "", text, flags=re.MULTILINE).strip()
+        if len(content) < 40:
+            return True
+
+        if capability == "outreach":
+            has_subject = re.search(r"^##\s+이메일 제목\s*$", text, flags=re.MULTILINE)
+            has_body = re.search(r"^##\s+메일 내용\s*$", text, flags=re.MULTILINE)
+            body_match = re.search(
+                r"^##\s+메일 내용\s*(.+?)(?=^##\s+|\Z)",
+                text,
+                flags=re.MULTILINE | re.DOTALL,
+            )
+            body = body_match.group(1).strip() if body_match else ""
+            return not has_subject or not has_body or len(body) < 80
+
+        return False
+
+    def _organization_from_context(self, context: str) -> str:
+        context_text = context.strip()
+        if not context_text:
+            return "상대 기관"
+
+        first_line = context_text.splitlines()[0].strip()
+        aliases = {
+            "lg cns": "LG CNS",
+            "lgu+": "LG U+",
+            "sk": "SK",
+            "kt": "KT",
+        }
+        lowered = first_line.lower()
+        return aliases.get(lowered, first_line.upper() if first_line.isascii() else first_line)
+
+    def _ensure_expected_sections(self, text: str, capability: str) -> str:
+        expected_sections = {
+            "meeting_prep": ["미팅 목적", "미팅 안건", "질문 리스트", "협상 포인트", "예상 답변과 대응"],
+            "partner_research": ["기관 요약", "사전 리서치 항목", "참석자 확인 포인트", "미팅 전 준비물", "확인 필요 사항"],
+            "lead_scoring": ["평가 기준", "우선순위 판단", "후보 확인 질문", "리스크", "다음 액션"],
+            "outreach": ["이메일 제목", "메일 내용", "확인 필요 사항"],
+            "meeting_follow_up": ["회의 요약", "주요 논의 사항", "후속 업무", "담당자와 기한", "후속 메일 초안"],
+        }
+        sections = expected_sections.get(capability)
+        if not sections:
+            return text
+
+        present_sections = [section for section in sections if re.search(rf"^##\s+{re.escape(section)}\s*$", text, flags=re.MULTILINE)]
+        if present_sections:
+            return text
+
+        if capability == "outreach" and text:
+            return f"""
+## 이메일 제목
+{text.splitlines()[0]}
+
+## 메일 내용
+{text}
+
+## 확인 필요 사항
+- 발송자 이름과 소속
+- 제안할 협업 범위
+- 미팅 가능 일정
+""".strip()
+
+        return text
+
+    def _fill_empty_sections(self, text: str, capability: str) -> str:
+        if capability != "outreach":
+            return text
+
+        if re.search(r"##\s+확인 필요 사항\s*$", text):
+            return f"""
+{text}
+- 발송자 이름과 소속
+- 제안할 협업 범위
+- 미팅 가능 일정
+""".strip()
+
+        return text
 
     def _contract_review_guide(self) -> str:
         return """
@@ -236,23 +488,21 @@ class ExternalAffairsAgent:
 
     def _outreach(self, task: str, context: str, signals: list[str]) -> str:
         focus = self._focus(signals)
+        organization = self._organization_from_context(context)
         return f"""
-## 컨택 전략
-- 요청 내용: {task}
-- 개인화 포인트: {focus}
-- 참고 맥락: {context or "추가 맥락 없음"}
+## 이메일 제목
+- {organization}와 {signals[0]} 협업 가능성 논의 요청
+- {organization} 담당자님께 협업 제안드립니다
+- {focus} 관련 공동 논의 가능성 문의
 
-## 이메일 제목 후보
-- {signals[0]} 관련 협업 제안드립니다
-- {signals[0]} 분야 공동 논의 가능성 문의
-- 귀 기관과의 협업 가능성 검토 요청
+## 메일 내용
+안녕하세요, {organization} 담당자님.
 
-## 1차 컨택 메일 초안
-안녕하세요, 담당자님.
+저는 [소속] [이름]입니다.
 
-저는 [소속/이름]입니다. 귀 기관의 {signals[0]} 관련 활동을 확인하고, 저희가 준비 중인 협업 방향과 연결될 수 있는 지점이 있어 연락드립니다.
-
-저희는 현재 {task}을 목표로 논의 대상을 검토하고 있습니다. 특히 {focus} 측면에서 상호 보완할 수 있는 가능성이 있다고 판단했습니다.
+{organization}의 {signals[0]} 관련 활동과 저희가 준비 중인 협업 방향이 연결될 수 있는 지점이 있다고 판단해 연락드립니다.
+저희는 현재 {task}와 관련해 함께 논의할 수 있는 기관을 검토하고 있습니다.
+특히 {focus} 측면에서 상호 보완할 수 있는 가능성이 있다고 보았습니다.
 
 가능하시다면 20~30분 정도 짧게 미팅을 통해 서로의 방향성과 협업 가능 범위를 확인해보고 싶습니다.
 
@@ -261,10 +511,10 @@ class ExternalAffairsAgent:
 감사합니다.
 [이름]
 
-## 후속 액션
-- 3영업일 내 미회신 시 짧은 리마인드 발송
-- 회신 시 미팅 목적, 예상 안건, 참석자를 먼저 공유
-- 관심이 낮을 경우 뉴스레터/자료 공유 관계로 전환
+## 확인 필요 사항
+- 발송자 이름과 소속
+- 제안할 협업 범위
+- 미팅 가능 일정
 """.strip()
 
     def _meeting_follow_up(self, task: str, context: str, signals: list[str]) -> str:
