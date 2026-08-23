@@ -56,3 +56,12 @@
 - `python -m compileall backend/app` 통과
 - `npm run build --prefix frontend` 통과
 - `/api/feedback` 테스트 요청에서 `200` 응답 확인
+
+### 추가 Push: MVP 기능 테스트 증적
+
+- README에 `MVP 기능 테스트` 섹션 추가
+- 계약서 분석 API를 텍스트 기반 샘플 계약서로 검증
+- 챗봇 세션 생성, 메시지 전송, 업무 질문 분류, reference 반환 확인
+- `/api/feedback` 좋아요 피드백 저장 응답 확인
+- 기관 리서치, 미팅 준비, 협력 평가, 1차 컨택, 후속 정리 fallback 산출물 생성 확인
+- 백엔드 컴파일과 프론트엔드 빌드 통과 결과를 README에 기록
