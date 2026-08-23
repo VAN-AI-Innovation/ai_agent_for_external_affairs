@@ -46,3 +46,16 @@ class ChatResponse(BaseModel):
     message: ChatMessageItem
     intent: str
     references: list[ChatReference]
+
+
+class FeedbackRequest(BaseModel):
+    target: str = Field(..., min_length=1, description="Feedback target area")
+    rating: str = Field(..., pattern="^(like|dislike)$", description="Feedback rating")
+    capability: str | None = Field(default=None, description="Related capability key")
+    prompt: str | None = Field(default=None, description="User prompt")
+    result_preview: str | None = Field(default=None, description="Short result preview")
+
+
+class FeedbackResponse(BaseModel):
+    status: str
+    count: int

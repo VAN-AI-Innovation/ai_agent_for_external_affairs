@@ -16,6 +16,8 @@ from app.api.schemas import (
     ChatResponse,
     ChatSessionResponse,
     ContractAnalysisResponse,
+    FeedbackRequest,
+    FeedbackResponse,
 )
 from app.core.config import Settings, get_settings
 
@@ -23,6 +25,7 @@ router = APIRouter(prefix="/api")
 
 MAX_CONTRACT_FILE_BYTES = 10 * 1024 * 1024
 chat_assistant: ChatAssistant | None = None
+feedback_events: list[dict[str, str | None]] = []
 
 
 def get_chat_assistant(settings: Settings = Depends(get_settings)) -> ChatAssistant:
@@ -91,6 +94,20 @@ def run_agent(
     )
 
     return AgentRunResponse(result=result)
+
+
+@router.post("/feedback", response_model=FeedbackResponse)
+def submit_feedback(payload: FeedbackRequest) -> FeedbackResponse:
+    feedback_events.append(
+        {
+            "target": payload.target,
+            "rating": payload.rating,
+            "capability": payload.capability,
+            "prompt": payload.prompt,
+            "result_preview": payload.result_preview,
+        }
+    )
+    return FeedbackResponse(status="saved", count=len(feedback_events))
 
 
 @router.post("/contracts/analyze", response_model=ContractAnalysisResponse)

@@ -2,6 +2,9 @@ import React, { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   Bot,
+  Check,
+  Clock3,
+  Copy,
   FileText,
   Handshake,
   Loader2,
@@ -9,6 +12,8 @@ import {
   MessageCircle,
   Search,
   Send,
+  ThumbsDown,
+  ThumbsUp,
   Upload,
   User,
   Users,
@@ -49,11 +54,22 @@ const examples: Record<CapabilityKey, string> = {
 const API_BASE_URL = "http://127.0.0.1:8002";
 const CHAT_SESSION_KEY = "external-affairs-chat-session";
 const CHAT_HISTORY_KEY = "external-affairs-chat-history";
+const RUN_HISTORY_KEY = "external-affairs-run-history";
 
 type ChatMessage = {
   role: "user" | "assistant";
   content: string;
   created_at?: string;
+};
+
+type RunHistoryItem = {
+  id: string;
+  capability: CapabilityKey;
+  label: string;
+  task: string;
+  context: string;
+  result: string;
+  createdAt: string;
 };
 
 const quickQuestions = [
@@ -336,6 +352,20 @@ function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
   const [health, setHealth] = useState("checking");
+  const [copied, setCopied] = useState(false);
+  const [feedback, setFeedback] = useState<"like" | "dislike" | "">("");
+  const [runHistory, setRunHistory] = useState<RunHistoryItem[]>(() => {
+    const saved = localStorage.getItem(RUN_HISTORY_KEY);
+    if (!saved) {
+      return [];
+    }
+
+    try {
+      return JSON.parse(saved) as RunHistoryItem[];
+    } catch {
+      return [];
+    }
+  });
 
   const selected = useMemo(
     () => capabilities.find((item) => item.key === capability)!,
@@ -347,6 +377,10 @@ function App() {
       .then((response) => (response.ok ? setHealth("online") : setHealth("offline")))
       .catch(() => setHealth("offline"));
   }, []);
+
+  useEffect(() => {
+    localStorage.setItem(RUN_HISTORY_KEY, JSON.stringify(runHistory.slice(0, 8)));
+  }, [runHistory]);
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -371,6 +405,8 @@ function App() {
       }
 
       setResult(data.result);
+      setFeedback("");
+      addRunHistory(data.result);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "알 수 없는 오류가 발생했습니다.");
     } finally {
@@ -387,6 +423,70 @@ function App() {
       method: "POST",
       body: formData,
     });
+  }
+
+  function addRunHistory(nextResult: string) {
+    const title =
+      capability === "contract_review"
+        ? contractFile?.name || "계약서 분석"
+        : task.trim().slice(0, 80);
+    const item: RunHistoryItem = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      capability,
+      label: selected.label,
+      task: title,
+      context,
+      result: nextResult,
+      createdAt: new Date().toLocaleString("ko-KR", {
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+      }),
+    };
+    setRunHistory((current) => [item, ...current.filter((history) => history.result !== nextResult)].slice(0, 8));
+  }
+
+  async function copyResult() {
+    if (!result) {
+      return;
+    }
+
+    await navigator.clipboard.writeText(result);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1400);
+  }
+
+  async function sendFeedback(nextFeedback: "like" | "dislike") {
+    if (!result) {
+      return;
+    }
+
+    setFeedback(nextFeedback);
+    try {
+      await fetch(`${API_BASE_URL}/api/feedback`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          target: "main_result",
+          rating: nextFeedback,
+          capability,
+          prompt: capability === "contract_review" ? contractFile?.name || "contract file" : task,
+          result_preview: result.slice(0, 240),
+        }),
+      });
+    } catch {
+      // 피드백은 보조 기능이라 API 실패 시에도 선택 상태는 유지합니다.
+    }
+  }
+
+  function restoreHistory(item: RunHistoryItem) {
+    setCapability(item.capability);
+    setTask(item.task || examples[item.capability]);
+    setContext(item.context);
+    setResult(item.result);
+    setFeedback("");
+    setContractFile(null);
   }
 
   const SelectedIcon = selected.icon;
@@ -424,7 +524,7 @@ function App() {
       <section className="workspace">
         <header className="topbar">
           <div>
-            <p className="eyebrow">Day 1 Prototype</p>
+            <p className="eyebrow">Local AI Workspace</p>
             <h2>
               <SelectedIcon size={22} />
               {selected.label}
@@ -480,11 +580,64 @@ function App() {
         </form>
 
         <section className="result-panel" aria-live="polite">
+          <div className="result-toolbar">
+            <span>{result ? "결과" : "대기 중"}</span>
+            <div className="result-actions">
+              <button className="tool-button" disabled={!result} onClick={copyResult} type="button" title="결과 복사">
+                {copied ? <Check size={16} /> : <Copy size={16} />}
+              </button>
+              <button
+                className={feedback === "like" ? "tool-button active" : "tool-button"}
+                disabled={!result}
+                onClick={() => sendFeedback("like")}
+                type="button"
+                title="좋아요"
+              >
+                <ThumbsUp size={16} />
+              </button>
+              <button
+                className={feedback === "dislike" ? "tool-button active" : "tool-button"}
+                disabled={!result}
+                onClick={() => sendFeedback("dislike")}
+                type="button"
+                title="싫어요"
+              >
+                <ThumbsDown size={16} />
+              </button>
+            </div>
+          </div>
           {error && <div className="error">{error}</div>}
           {result ? (
             <div className="rendered-result">{renderMarkdownLike(result)}</div>
           ) : (
             <p className="placeholder">분석 결과가 여기에 표시됩니다.</p>
+          )}
+        </section>
+
+        <section className="history-panel" aria-label="최근 실행 기록">
+          <div className="history-header">
+            <h3>
+              <Clock3 size={18} />
+              최근 실행 기록
+            </h3>
+            {runHistory.length > 0 && (
+              <button className="text-button" onClick={() => setRunHistory([])} type="button">
+                비우기
+              </button>
+            )}
+          </div>
+          {runHistory.length > 0 ? (
+            <div className="history-list">
+              {runHistory.map((item) => (
+                <button className="history-item" key={item.id} onClick={() => restoreHistory(item)} type="button">
+                  <span>{item.label}</span>
+                  <strong>{item.task}</strong>
+                  <small>{item.createdAt}</small>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <p className="placeholder">실행한 결과가 최근 기록으로 저장됩니다.</p>
           )}
         </section>
       </section>

@@ -89,7 +89,7 @@ h2 {
 
 .workspace {
   display: grid;
-  grid-template-rows: auto auto 1fr;
+  grid-template-rows: auto auto minmax(260px, 1fr) auto;
   gap: 20px;
   padding: 28px;
 }
@@ -215,12 +215,60 @@ textarea:focus {
 }
 
 .result-panel {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 14px;
   min-height: 320px;
   border: 1px solid #d8d8d8;
   border-radius: 8px;
   padding: 18px;
   background: #ffffff;
   overflow: auto;
+}
+
+.result-toolbar,
+.history-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+
+.result-toolbar {
+  border-bottom: 1px solid #eeeeee;
+  padding-bottom: 10px;
+  color: #555555;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.result-actions {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.tool-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid #d3d3d3;
+  border-radius: 8px;
+  color: #111111;
+  background: #ffffff;
+  cursor: pointer;
+}
+
+.tool-button:hover,
+.tool-button.active {
+  border-color: #111111;
+  background: #f0f0f0;
+}
+
+.tool-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .placeholder {
@@ -289,6 +337,76 @@ textarea:focus {
 .error {
   color: #111111;
   font-weight: 700;
+}
+
+.history-panel {
+  display: grid;
+  gap: 12px;
+  border: 1px solid #d8d8d8;
+  border-radius: 8px;
+  padding: 16px;
+  background: #ffffff;
+}
+
+.history-header h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 16px;
+}
+
+.text-button {
+  border: 0;
+  padding: 0;
+  color: #555555;
+  background: transparent;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.text-button:hover {
+  color: #111111;
+}
+
+.history-list {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.history-item {
+  display: grid;
+  gap: 5px;
+  min-height: 92px;
+  border: 1px solid #dedede;
+  border-radius: 8px;
+  padding: 10px;
+  color: #111111;
+  background: #ffffff;
+  cursor: pointer;
+  text-align: left;
+}
+
+.history-item:hover {
+  border-color: #111111;
+}
+
+.history-item span,
+.history-item small {
+  color: #777777;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.history-item strong {
+  overflow: hidden;
+  display: -webkit-box;
+  font-size: 13px;
+  line-height: 1.35;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .chatbot {
@@ -534,7 +652,8 @@ textarea:focus {
   }
 
   .capability-list,
-  .request-panel {
+  .request-panel,
+  .history-list {
     grid-template-columns: 1fr;
   }
 
