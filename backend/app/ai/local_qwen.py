@@ -1,9 +1,10 @@
 from functools import lru_cache
 
+from app.ai.base import AiGenerationError
 from app.core.config import Settings
 
 
-class LocalModelUnavailableError(RuntimeError):
+class LocalModelUnavailableError(AiGenerationError):
     pass
 
 

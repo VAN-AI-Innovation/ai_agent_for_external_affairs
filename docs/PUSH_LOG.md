@@ -65,3 +65,36 @@
 - `/api/feedback` 좋아요 피드백 저장 응답 확인
 - 기관 리서치, 미팅 준비, 협력 평가, 1차 컨택, 후속 정리 fallback 산출물 생성 확인
 - 백엔드 컴파일과 프론트엔드 빌드 통과 결과를 README에 기록
+
+## 2026-08-31
+
+### Push 대상
+
+- Repository: `https://github.com/VAN-AI-Innovation/ai_agent_for_external_affairs.git`
+- Branch: `main`
+
+### 작업 요약
+
+- `AiClient` 공통 인터페이스를 추가해 일반 대외업무 생성 모델을 교체 가능한 구조로 분리
+- `OpenAIClient`, `GeminiClient`, `LocalQwenClient`를 같은 `generate(system_prompt, user_prompt)` 방식으로 사용할 수 있게 구성
+- `AI_PROVIDER=auto`에서 OpenAI API Key, Gemini API Key, Qwen 로컬 모델 순서로 provider를 선택하도록 구현
+- Qwen 로컬 모델의 CPU 실행 기준 첫 요청과 두 번째 요청 처리 시간을 측정해 README에 기록
+- Gemini API 전환 시 관리할 응답 시간과 구조화 출력 안정성 기준을 README에 정리
+- 챗봇 세션, 챗봇 메시지, 좋아요/싫어요 피드백을 SQLite에 저장하도록 변경
+- `backend/app/storage` 레이어를 추가해 추후 PostgreSQL/MySQL 같은 DB로 교체할 수 있는 진입점 마련
+- 실제 DB 파일이 생성되는 `data/` 폴더를 `.gitignore`에 추가
+
+### 선택 이유
+
+- 현재는 Qwen 로컬 모델을 유지하되, API Key를 넣는 순간 외부 API가 같은 업무 생성 역할을 대체할 수 있게 구성
+- Gemini API 전환을 앞두고 업무 로직과 모델 호출 로직을 분리해 모델 교체 시 수정 범위를 줄임
+- SQLite는 별도 서버 설치 없이 사용할 수 있으면서 서버 재시작 후에도 챗봇 히스토리와 피드백이 남기 때문에 MVP 저장소로 적합
+- 저장소 접근을 `storage` 레이어로 분리해 향후 DB 교체를 라우터나 Agent 수정 없이 진행하기 쉬운 구조로 만듦
+
+### 확인한 내용
+
+- `python -m compileall backend/app` 통과
+- `npm run build --prefix frontend` 통과
+- AI provider 분기 테스트 통과: Qwen, OpenAI, Gemini 선택 확인
+- 챗봇 세션 생성, 메시지 전송, 히스토리 조회가 SQLite 기준으로 정상 동작 확인
+- `/api/feedback` 요청이 SQLite 저장 후 `saved` 상태를 반환하는 것 확인

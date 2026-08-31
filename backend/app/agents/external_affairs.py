@@ -1,7 +1,7 @@
 import re
 from collections import Counter
 
-from app.ai.local_qwen import LocalModelUnavailableError, LocalQwenClient
+from app.ai.base import AiClient, AiGenerationError
 
 
 CAPABILITY_GUIDE = {
@@ -31,7 +31,7 @@ STOPWORDS = {
 
 
 class ExternalAffairsAgent:
-    def __init__(self, ai_client: LocalQwenClient | None = None):
+    def __init__(self, ai_client: AiClient | None = None):
         self._ai_client = ai_client
 
     def run(self, task: str, context: str | None = None, capability: str | None = None) -> str:
@@ -82,7 +82,7 @@ class ExternalAffairsAgent:
                     cleaned = self._clean_model_output(retry, capability, context)
                 if not self._is_incomplete_output(cleaned, capability):
                     return cleaned
-            except LocalModelUnavailableError:
+            except AiGenerationError:
                 pass
 
         return self._fallback(capability, task, context, signals)

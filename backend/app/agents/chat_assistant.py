@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from app.ai.local_qwen import LocalQwenClient
+from app.ai.base import AiClient
 
 
 TOKEN_PATTERN = re.compile(r"[가-힣A-Za-z0-9]{2,}")
@@ -76,27 +76,37 @@ class ChatMessage:
 
 
 class ChatAssistant:
-    def __init__(self, ai_client: LocalQwenClient | None = None):
+    def __init__(self, ai_client: AiClient | None = None, store=None):
         self._ai_client = ai_client
+        self._store = store
         self._sessions: dict[str, list[ChatMessage]] = {}
 
     def create_session(self) -> str:
         session_id = uuid4().hex
-        self._sessions[session_id] = [
-            ChatMessage(
-                role="assistant",
-                content="안녕하세요. 대외업무 매뉴얼 검색, 담당자 확인 질문 정리, 미팅 준비를 도와드릴게요.",
-            )
-        ]
+        welcome_message = ChatMessage(
+            role="assistant",
+            content="안녕하세요. 대외업무 매뉴얼 검색, 담당자 확인 질문 정리, 미팅 준비를 도와드릴게요.",
+        )
+        if self._store:
+            self._store.create_chat_session(session_id)
+            self._store.add_chat_message(session_id, welcome_message)
+        else:
+            self._sessions[session_id] = [welcome_message]
         return session_id
 
     def history(self, session_id: str) -> list[ChatMessage]:
+        if self._store:
+            return self._store.get_chat_history(session_id)
         return self._sessions.setdefault(session_id, [])
 
     def reply(self, session_id: str, message: str) -> dict[str, object]:
-        session = self._sessions.setdefault(session_id, [])
         user_message = message.strip()
-        session.append(ChatMessage(role="user", content=user_message))
+        user_chat_message = ChatMessage(role="user", content=user_message)
+        if self._store:
+            self._store.add_chat_message(session_id, user_chat_message)
+        else:
+            session = self._sessions.setdefault(session_id, [])
+            session.append(user_chat_message)
 
         if self._is_blocked(user_message):
             answer = self._blocked_answer()
@@ -108,12 +118,16 @@ class ChatAssistant:
             references = [{"id": item["id"], "title": item["title"]} for item in matches]
             answer = self._generate_answer(user_message, intent, matches)
 
-        session.append(ChatMessage(role="assistant", content=answer))
-        self._sessions[session_id] = session[-30:]
+        assistant_message = ChatMessage(role="assistant", content=answer)
+        if self._store:
+            self._store.add_chat_message(session_id, assistant_message)
+        else:
+            session.append(assistant_message)
+            self._sessions[session_id] = session[-30:]
 
         return {
             "session_id": session_id,
-            "message": ChatMessage(role="assistant", content=answer),
+            "message": assistant_message,
             "intent": intent,
             "references": references,
         }

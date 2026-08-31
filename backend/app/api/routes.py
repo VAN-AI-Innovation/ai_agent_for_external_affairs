@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 
-from app.ai.local_qwen import LocalQwenClient
+from app.ai.provider import create_ai_client
 from app.agents.chat_assistant import ChatAssistant
 from app.agents.contract_document import (
     SUPPORTED_EXTENSIONS,
@@ -20,18 +20,30 @@ from app.api.schemas import (
     FeedbackResponse,
 )
 from app.core.config import Settings, get_settings
+from app.storage.provider import create_store
+from app.storage.sqlite_store import SQLiteStore
 
 router = APIRouter(prefix="/api")
 
 MAX_CONTRACT_FILE_BYTES = 10 * 1024 * 1024
 chat_assistant: ChatAssistant | None = None
-feedback_events: list[dict[str, str | None]] = []
+store: SQLiteStore | None = None
 
 
-def get_chat_assistant(settings: Settings = Depends(get_settings)) -> ChatAssistant:
+def get_store(settings: Settings = Depends(get_settings)) -> SQLiteStore:
+    global store
+    if store is None:
+        store = create_store(settings)
+    return store
+
+
+def get_chat_assistant(
+    settings: Settings = Depends(get_settings),
+    app_store: SQLiteStore = Depends(get_store),
+) -> ChatAssistant:
     global chat_assistant
     if chat_assistant is None:
-        chat_assistant = ChatAssistant(LocalQwenClient(settings))
+        chat_assistant = ChatAssistant(create_ai_client(settings), app_store)
     return chat_assistant
 
 
@@ -87,7 +99,7 @@ def run_agent(
     payload: AgentRunRequest,
     settings: Settings = Depends(get_settings),
 ) -> AgentRunResponse:
-    result = ExternalAffairsAgent(LocalQwenClient(settings)).run(
+    result = ExternalAffairsAgent(create_ai_client(settings)).run(
         task=payload.task,
         context=payload.context,
         capability=payload.capability,
@@ -97,17 +109,18 @@ def run_agent(
 
 
 @router.post("/feedback", response_model=FeedbackResponse)
-def submit_feedback(payload: FeedbackRequest) -> FeedbackResponse:
-    feedback_events.append(
-        {
-            "target": payload.target,
-            "rating": payload.rating,
-            "capability": payload.capability,
-            "prompt": payload.prompt,
-            "result_preview": payload.result_preview,
-        }
+def submit_feedback(
+    payload: FeedbackRequest,
+    app_store: SQLiteStore = Depends(get_store),
+) -> FeedbackResponse:
+    count = app_store.save_feedback(
+        target=payload.target,
+        rating=payload.rating,
+        capability=payload.capability,
+        prompt=payload.prompt,
+        result_preview=payload.result_preview,
     )
-    return FeedbackResponse(status="saved", count=len(feedback_events))
+    return FeedbackResponse(status="saved", count=count)
 
 
 @router.post("/contracts/analyze", response_model=ContractAnalysisResponse)
