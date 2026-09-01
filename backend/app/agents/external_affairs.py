@@ -25,8 +25,33 @@ STOPWORDS = {
     "사용",
     "작성",
     "정리",
+    "처음",
+    "연락",
+    "연락하는",
+    "기관",
+    "담당자",
+    "담당자에게",
+    "보낼",
+    "이메일",
+    "초안",
+    "초안을",
+    "공개",
+    "리서치",
+    "검색",
+    "대상",
+    "출처",
+    "요약",
+    "공식",
+    "홈페이지",
+    "http",
+    "https",
+    "www",
+    "com",
+    "co",
+    "kr",
     "만들어줘",
     "준비해줘",
+    "작성해줘",
 }
 
 
@@ -37,7 +62,8 @@ class ExternalAffairsAgent:
     def run(self, task: str, context: str | None = None, capability: str | None = None) -> str:
         task_text = task.strip()
         context_text = context.strip() if context else ""
-        signals = self._extract_signals(f"{task_text}\n{context_text}")
+        signal_context = self._strip_research_context(context_text)
+        signals = self._extract_signals(f"{task_text}\n{signal_context}")
 
         if capability == "contract_review":
             return self._contract_review_guide()
@@ -66,6 +92,9 @@ class ExternalAffairsAgent:
     def _focus(self, signals: list[str], limit: int = 4) -> str:
         return ", ".join(signals[:limit])
 
+    def _strip_research_context(self, context: str) -> str:
+        return context.split("공개 웹 리서치:", 1)[0].strip()
+
     def _run_ai_or_fallback(self, capability: str, task: str, context: str, signals: list[str]) -> str:
         if self._ai_client and self._ai_client.is_configured:
             try:
@@ -73,13 +102,13 @@ class ExternalAffairsAgent:
                     self._system_prompt(),
                     self._user_prompt(capability, task, context, signals),
                 )
-                cleaned = self._clean_model_output(generated, capability, context)
+                cleaned = self._clean_model_output(generated, capability, task, context, signals)
                 if self._is_incomplete_output(cleaned, capability):
                     retry = self._ai_client.generate(
                         self._system_prompt(),
                         self._retry_prompt(capability, task, context, signals),
                     )
-                    cleaned = self._clean_model_output(retry, capability, context)
+                    cleaned = self._clean_model_output(retry, capability, task, context, signals)
                 if not self._is_incomplete_output(cleaned, capability):
                     return cleaned
             except AiGenerationError:
@@ -120,6 +149,7 @@ class ExternalAffairsAgent:
 ## 질문 리스트
 ## 협상 포인트
 ## 예상 답변과 대응
+## 참고 출처
 """.strip(),
             "partner_research": """
 아래 섹션만 작성한다.
@@ -128,6 +158,7 @@ class ExternalAffairsAgent:
 ## 참석자 확인 포인트
 ## 미팅 전 준비물
 ## 확인 필요 사항
+## 참고 출처
 """.strip(),
             "lead_scoring": """
 아래 섹션만 작성한다.
@@ -136,6 +167,7 @@ class ExternalAffairsAgent:
 ## 후보 확인 질문
 ## 리스크
 ## 다음 액션
+## 참고 출처
 """.strip(),
             "outreach": """
 아래 섹션만 작성한다.
@@ -150,6 +182,9 @@ class ExternalAffairsAgent:
 
 ## 확인 필요 사항
 - 발송 전에 채워야 하는 정보만 bullet로 작성한다.
+
+## 참고 출처
+- 공개 웹 리서치가 제공된 경우 사용한 URL만 bullet로 작성한다.
 """.strip(),
             "meeting_follow_up": """
 아래 섹션만 작성한다.
@@ -158,6 +193,7 @@ class ExternalAffairsAgent:
 ## 후속 업무
 ## 담당자와 기한
 ## 후속 메일 초안
+## 참고 출처
 """.strip(),
         }
         guide = output_guides.get(
@@ -188,11 +224,13 @@ class ExternalAffairsAgent:
 {guide}
 - 사용자가 그대로 복사해 업무에 사용할 수 있게 구체적으로 작성한다.
 - 불확실한 내용은 추정하지 말고 확인 필요 사항으로 분리
+- 추가 맥락에 `공개 웹 리서치`가 있으면 기관 소개, 협업 이유, 질문, 메일 본문에 우선 반영
+- 공개 웹 리서치에 출처 URL이 있으면 `## 참고 출처` 섹션에 포함
 - 내부 구현 방식, API, 프롬프트, fallback 같은 기술 용어는 출력하지 않음
 - `## 이메일 제목` 같은 섹션 제목을 제외하고 마크다운 장식용 별표를 쓰지 않음
 """.strip()
 
-    def _clean_model_output(self, text: str, capability: str, context: str) -> str:
+    def _clean_model_output(self, text: str, capability: str, task: str, context: str, signals: list[str]) -> str:
         organization = self._organization_from_context(context)
         forbidden_patterns = [
             r"^출력 요구[:：]?$",
@@ -258,7 +296,7 @@ class ExternalAffairsAgent:
         cleaned = "\n".join(cleaned_lines)
         cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
         cleaned = self._ensure_expected_sections(cleaned, capability)
-        cleaned = self._fill_empty_sections(cleaned, capability)
+        cleaned = self._fill_empty_sections(cleaned, capability, task, context, signals)
         return cleaned or text.strip()
 
     def _retry_prompt(self, capability: str, task: str, context: str, signals: list[str]) -> str:
@@ -307,17 +345,37 @@ class ExternalAffairsAgent:
             return True
 
         if capability == "outreach":
-            has_subject = re.search(r"^##\s+이메일 제목\s*$", text, flags=re.MULTILINE)
-            has_body = re.search(r"^##\s+메일 내용\s*$", text, flags=re.MULTILINE)
-            body_match = re.search(
-                r"^##\s+메일 내용\s*(.+?)(?=^##\s+|\Z)",
-                text,
-                flags=re.MULTILINE | re.DOTALL,
+            subject = self._section_body(text, "이메일 제목")
+            body = self._section_body(text, "메일 내용")
+            has_real_subject = len([line for line in subject.splitlines() if line.strip().startswith("-")]) >= 1
+            has_real_body = (
+                len(body) >= 120
+                and "안녕하세요" in body
+                and "감사합니다" in body
+                and "미팅" in body
+                and not body.lstrip().startswith("-")
             )
-            body = body_match.group(1).strip() if body_match else ""
-            return not has_subject or not has_body or len(body) < 80
+            instruction_leak = any(
+                term in text
+                for term in [
+                    "채워야 하는 정보",
+                    "제공되지 않았",
+                    "명확하게 전달해야",
+                    "추정하지 않는 내용",
+                    "이미 제공되지",
+                ]
+            )
+            return not has_real_subject or not has_real_body or instruction_leak
 
         return False
+
+    def _section_body(self, text: str, title: str) -> str:
+        match = re.search(
+            rf"^##\s+{re.escape(title)}\s*(.+?)(?=^##\s+|\Z)",
+            text,
+            flags=re.MULTILINE | re.DOTALL,
+        )
+        return match.group(1).strip() if match else ""
 
     def _organization_from_context(self, context: str) -> str:
         context_text = context.strip()
@@ -366,9 +424,14 @@ class ExternalAffairsAgent:
 
         return text
 
-    def _fill_empty_sections(self, text: str, capability: str) -> str:
+    def _fill_empty_sections(self, text: str, capability: str, task: str, context: str, signals: list[str]) -> str:
         if capability != "outreach":
             return text
+
+        subject = self._section_body(text, "이메일 제목")
+        body = self._section_body(text, "메일 내용")
+        if not subject or len(body) < 80 or body.lstrip().startswith("-"):
+            return self._outreach(task, context, signals)
 
         if re.search(r"##\s+확인 필요 사항\s*$", text):
             return f"""
@@ -391,6 +454,19 @@ class ExternalAffairsAgent:
 - 분석 기준 입력
 - `분석` 버튼 클릭
 """.strip()
+
+    def _source_section(self, context: str) -> str:
+        sources = re.findall(r"- 출처 \d+:\s*(.+?)\s*\((https?://[^)]+)\)", context)
+        if not sources:
+            return """
+## 참고 출처
+- 공개 웹 리서치 출처 없음
+""".strip()
+
+        lines = ["## 참고 출처"]
+        for title, url in sources[:3]:
+            lines.append(f"- {title}: {url}")
+        return "\n".join(lines)
 
     def _meeting_prep(self, task: str, context: str, signals: list[str]) -> str:
         focus = self._focus(signals)
@@ -423,6 +499,8 @@ class ExternalAffairsAgent:
 - 상대방이 “내부 검토가 필요하다”고 답할 경우: 검토 기준과 회신 일정을 먼저 합의합니다.
 - 상대방이 “범위를 넓히자”고 제안할 경우: 파일럿 범위와 본계약 범위를 분리합니다.
 - 상대방이 “비용을 낮추자”고 요청할 경우: 제공 범위, 일정, 산출물을 함께 조정합니다.
+
+{self._source_section(context)}
 """.strip()
 
     def _partner_research(self, task: str, context: str, signals: list[str]) -> str:
@@ -455,6 +533,8 @@ class ExternalAffairsAgent:
 - 협업 가설 2개
 - 상대방에게 확인할 질문 5개
 - 제안 가능한 파일럿 범위 1개
+
+{self._source_section(context)}
 """.strip()
 
     def _lead_scoring(self, task: str, context: str, signals: list[str]) -> str:
@@ -484,25 +564,27 @@ class ExternalAffairsAgent:
 - 협업 담당자와 의사결정자가 분리되어 있는가?
 - 파일럿을 작게 시작할 수 있는가?
 - 우리 쪽 리소스 대비 기대 효과가 충분한가?
+
+{self._source_section(context)}
 """.strip()
 
     def _outreach(self, task: str, context: str, signals: list[str]) -> str:
-        focus = self._focus(signals)
         organization = self._organization_from_context(context)
+        topic = self._outreach_topic(signals, organization)
         return f"""
 ## 이메일 제목
-- {organization}와 {signals[0]} 협업 가능성 논의 요청
-- {organization} 담당자님께 협업 제안드립니다
-- {focus} 관련 공동 논의 가능성 문의
+- {organization}와 협업 가능성 논의 요청
+- {organization} 담당자님께 공동 협업 제안드립니다
+- {organization} 협업 미팅 제안의 건
 
 ## 메일 내용
 안녕하세요, {organization} 담당자님.
 
 저는 [소속] [이름]입니다.
 
-{organization}의 {signals[0]} 관련 활동과 저희가 준비 중인 협업 방향이 연결될 수 있는 지점이 있다고 판단해 연락드립니다.
-저희는 현재 {task}와 관련해 함께 논의할 수 있는 기관을 검토하고 있습니다.
-특히 {focus} 측면에서 상호 보완할 수 있는 가능성이 있다고 보았습니다.
+{organization}의 사업 방향과 저희가 준비 중인 {topic} 방향이 연결될 수 있는 지점이 있다고 판단해 연락드립니다.
+저희는 현재 양사가 함께 시도해볼 수 있는 협업 기회를 검토하고 있으며, 초기 논의를 통해 서로의 니즈와 가능 범위를 확인하고자 합니다.
+특히 보유 역량, 고객 접점, 실행 자원을 함께 검토하면 상호 보완적인 협업 구조를 만들 수 있을 것으로 보았습니다.
 
 가능하시다면 20~30분 정도 짧게 미팅을 통해 서로의 방향성과 협업 가능 범위를 확인해보고 싶습니다.
 
@@ -515,7 +597,44 @@ class ExternalAffairsAgent:
 - 발송자 이름과 소속
 - 제안할 협업 범위
 - 미팅 가능 일정
+
+{self._source_section(context)}
 """.strip()
+
+    def _outreach_topic(self, signals: list[str], organization: str) -> str:
+        generic_terms = {
+            "협업",
+            "제안",
+            "공동",
+            "가능성",
+            "논의",
+            "미팅",
+            "일정",
+            "상대",
+            "초안",
+            "초안을",
+            "공개",
+            "리서치",
+            "검색",
+            "대상",
+            "출처",
+            "요약",
+            "공식",
+            "홈페이지",
+            "http",
+            "https",
+            "www",
+            "com",
+            "co",
+            "kr",
+        }
+        organization_key = organization.lower().replace(" ", "")
+        for signal in signals:
+            if signal.lower().replace(" ", "") == organization_key:
+                continue
+            if signal not in generic_terms:
+                return f"{signal} 관련 협업"
+        return "협업 제안"
 
     def _meeting_follow_up(self, task: str, context: str, signals: list[str]) -> str:
         focus = self._focus(signals)
@@ -552,6 +671,8 @@ class ExternalAffairsAgent:
 확인 후 수정하거나 보완할 내용이 있다면 편하게 말씀 부탁드립니다. 다음 단계 진행을 위해 필요한 자료와 일정도 함께 조율드리겠습니다.
 
 감사합니다.
+
+{self._source_section(context)}
 """.strip()
 
     def _general(self, task: str, context: str, signals: list[str]) -> str:

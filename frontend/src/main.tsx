@@ -51,7 +51,7 @@ const examples: Record<CapabilityKey, string> = {
   meeting_follow_up: "미팅 메모를 바탕으로 회의록, 후속 업무, 담당자를 정리하는 템플릿을 만들어줘.",
 };
 
-const API_BASE_URL = "http://127.0.0.1:8002";
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8002";
 const CHAT_SESSION_KEY = "external-affairs-chat-session";
 const CHAT_HISTORY_KEY = "external-affairs-chat-history";
 const RUN_HISTORY_KEY = "external-affairs-run-history";
@@ -269,7 +269,7 @@ function FloatingChatbot() {
         <section className="chat-window" aria-label="AI 에이전트 채팅">
           <header className="chat-header">
             <div>
-              <p className="eyebrow">AI Assistant</p>
+              <p className="eyebrow">VAN AI Desk</p>
               <h3>
                 <Bot size={18} />
                 대외업무 챗봇
@@ -494,9 +494,17 @@ function App() {
   return (
     <main className="app-shell">
       <aside className="sidebar">
-        <div>
-          <p className="eyebrow">External Affairs AI</p>
-          <h1>대외업무 통합 에이전트</h1>
+        <div className="brand-lockup">
+          <span className="brand-mark">V</span>
+          <div>
+            <p className="eyebrow">VAN Operations</p>
+            <h1>External Affairs AI</h1>
+          </div>
+        </div>
+        <div className="sidebar-brief">
+          <span>VAN CONFERENCE 2026</span>
+          <strong>Partnership Desk</strong>
+          <small>Contract · Research · Meeting · Outreach</small>
         </div>
         <nav className="capability-list" aria-label="업무 유형">
           {capabilities.map((item) => {
@@ -524,13 +532,16 @@ function App() {
       <section className="workspace">
         <header className="topbar">
           <div>
-            <p className="eyebrow">Local AI Workspace</p>
+            <p className="eyebrow">Official Operations Console</p>
             <h2>
               <SelectedIcon size={22} />
               {selected.label}
             </h2>
           </div>
-          <span className={`status ${health}`}>{health}</span>
+          <div className="topbar-meta">
+            <span>PARTNERSHIP / CONTRACT / MEETING</span>
+            <span className={`status ${health}`}>{health}</span>
+          </div>
         </header>
 
         <form className="request-panel" onSubmit={submit}>

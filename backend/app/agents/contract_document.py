@@ -8,6 +8,7 @@ from pypdf import PdfReader
 from pypdf.errors import PdfReadError
 
 from app.agents.local_contract_analyzer import LocalContractAnalyzer
+from app.security.masking import mask_sensitive_text
 
 
 SUPPORTED_EXTENSIONS = {".pdf", ".txt", ".md", ".docx", ".png", ".jpg", ".jpeg"}
@@ -129,4 +130,7 @@ class ContractDocumentAgent:
 
     def analyze_document(self, file_bytes: bytes, filename: str, review_focus: str | None = None) -> str:
         contract_text, page_count = extract_text_from_contract_document(file_bytes, filename)
-        return self._analyzer.analyze(contract_text, filename, page_count or 1, review_focus)
+        masked_text = mask_sensitive_text(contract_text)
+        masked_focus = mask_sensitive_text(review_focus)
+        masked_filename = mask_sensitive_text(filename)
+        return self._analyzer.analyze(masked_text, masked_filename, page_count or 1, masked_focus)
