@@ -13,6 +13,7 @@ from app.security.masking import mask_sensitive_text
 
 SUPPORTED_EXTENSIONS = {".pdf", ".txt", ".md", ".docx", ".png", ".jpg", ".jpeg"}
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg"}
+PDF_OCR_SCALE = 2.0
 
 
 class ContractTextExtractionError(ValueError):
@@ -42,20 +43,67 @@ def _extract_text_from_pdf(pdf_bytes: bytes) -> tuple[str, int]:
     except PdfReadError as exc:
         raise ContractTextExtractionError("PDF 파일을 읽을 수 없습니다.") from exc
 
-    page_texts: list[str] = []
+    page_texts: dict[int, str] = {}
+    scanned_page_numbers: list[int] = []
     for index, page in enumerate(reader.pages, start=1):
         text = page.extract_text() or ""
         cleaned = text.strip()
         if cleaned:
-            page_texts.append(f"[페이지 {index}]\n{cleaned}")
+            page_texts[index] = cleaned
+        else:
+            scanned_page_numbers.append(index)
 
-    full_text = "\n\n".join(page_texts).strip()
+    if scanned_page_numbers:
+        page_texts.update(_extract_text_from_scanned_pdf_pages(pdf_bytes, scanned_page_numbers))
+
+    full_text = "\n\n".join(
+        f"[페이지 {index}]\n{page_texts[index]}"
+        for index in range(1, len(reader.pages) + 1)
+        if page_texts.get(index)
+    ).strip()
     if not full_text:
         raise ContractTextExtractionError(
-            "PDF에서 텍스트를 추출하지 못했습니다. 스캔 PDF는 PNG/JPEG 이미지로 변환해 업로드하거나 OCR 확장 처리가 필요합니다."
+            "PDF에서 텍스트를 추출하지 못했습니다. 해상도와 글자 선명도를 확인하세요."
         )
 
     return full_text, len(reader.pages)
+
+
+def _extract_text_from_scanned_pdf_pages(pdf_bytes: bytes, page_numbers: list[int]) -> dict[int, str]:
+    try:
+        import fitz
+    except ImportError as exc:
+        raise ContractTextExtractionError("스캔 PDF OCR을 위해 PyMuPDF 설치가 필요합니다.") from exc
+
+    reader = _get_ocr_reader()
+    extracted: dict[int, str] = {}
+    temp_paths: list[str] = []
+
+    try:
+        with fitz.open(stream=pdf_bytes, filetype="pdf") as document:
+            matrix = fitz.Matrix(PDF_OCR_SCALE, PDF_OCR_SCALE)
+            for page_number in page_numbers:
+                page = document.load_page(page_number - 1)
+                pixmap = page.get_pixmap(matrix=matrix, alpha=False)
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as temp_file:
+                    temp_path = temp_file.name
+                temp_paths.append(temp_path)
+                pixmap.save(temp_path)
+
+                results = reader.readtext(temp_path, detail=0, paragraph=True)
+                text = "\n".join(item.strip() for item in results if item.strip()).strip()
+                if text:
+                    extracted[page_number] = text
+    except Exception as exc:
+        raise ContractTextExtractionError("스캔 PDF OCR 처리 중 오류가 발생했습니다.") from exc
+    finally:
+        for temp_path in temp_paths:
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
+
+    return extracted
 
 
 def _extract_text_from_plain_text(file_bytes: bytes) -> str:
